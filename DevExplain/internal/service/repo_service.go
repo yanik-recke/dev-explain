@@ -10,6 +10,7 @@ import (
 	"github.com/amikos-tech/chroma-go/pkg/embeddings"
 	ollama "github.com/amikos-tech/chroma-go/pkg/embeddings/ollama"
 	"github.com/google/go-github/v72/github"
+	"github.com/yanik-recke/devexplain/internal/parser"
 )
 
 
@@ -32,16 +33,20 @@ func NewRepoService(dbClient chromago.Client, ollamaBaseUrl string, embedModel s
 }
 
 func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
-	// TODO parse url
+
+	author, repoName, err := parser.ParseGitHubURL(url)
+	if err != nil {
+		return fmt.Errorf("error while trying to parse url: %w", err)
+	}
 
 	// Check if repository exists
-	repo, res, err := r.githubClient.Repositories.Get(ctx, "yanik-recke", url)
+	repo, res, err := r.githubClient.Repositories.Get(ctx, author, repoName)
 	if err != nil {
 		log.Println(res.StatusCode)
 		return fmt.Errorf("erorr while trying to get repo: %w", err)
 	}
 
-	commits, res, err := r.githubClient.Repositories.ListCommits(ctx, "yanik-recke", url, nil)
+	commits, res, err := r.githubClient.Repositories.ListCommits(ctx, author, repoName, nil)
 
 	if err != nil {
 		log.Println(res.StatusCode)
@@ -65,7 +70,7 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 	}
 
 	for i := range commits {
-		commit, res, err := r.githubClient.Repositories.GetCommit(ctx, "yanik-recke", url, *commits[i].SHA, nil)
+		commit, res, err := r.githubClient.Repositories.GetCommit(ctx, author, repoName, *commits[i].SHA, nil)
 		
 		if err != nil {
 			log.Printf("error retrieving commit with sha: %s - github responded with code: %d", *commits[i].SHA, res.StatusCode)

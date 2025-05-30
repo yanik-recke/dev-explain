@@ -89,7 +89,7 @@ func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoNa
 		ctx,
 		chromago.WithQueryEmbeddings(embedded),
 		chromago.WithIncludeQuery(chromago.IncludeMetadatas, chromago.IncludeDocuments),
-		chromago.WithNResults(5),
+		chromago.WithNResults(1),
 	)
 
 	if err != nil {
@@ -160,7 +160,7 @@ func (l *LlmService) embed(ctx context.Context, prompt string) (embeddings.Embed
 
 func (l *LlmService) generateResponse(ctx context.Context, prompt string, data string) (string, error) {
 	enhancedPrompt := LLMContext +  "Using this information: " + data + "\nPlease reply to this prompt:\n" + prompt
-	// log.Println(enhancedPrompt)
+	log.Println(enhancedPrompt)
 	reqBody, err := json.Marshal(GeneratedRequest{
 		Model: l.convModel,
 		Prompt: enhancedPrompt,
