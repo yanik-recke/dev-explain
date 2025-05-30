@@ -32,6 +32,12 @@ func NewRepoService(dbClient chromago.Client, ollamaBaseUrl string, embedModel s
 	}
 }
 
+
+// Tries to retrieve the Github repository of 
+// the passed url and embed all the commits.
+// Instead of embedding the whole commit diff, each file
+// will be embedded separately so that a query only returns relevant
+// files
 func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 
 	author, repoName, err := parser.ParseGitHubURL(url)
@@ -46,6 +52,7 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 		return fmt.Errorf("erorr while trying to get repo: %w", err)
 	}
 
+	// Get commits
 	commits, res, err := r.githubClient.Repositories.ListCommits(ctx, author, repoName, nil)
 
 	if err != nil {
@@ -53,12 +60,14 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 		return fmt.Errorf("error while trying to find commits: %w", err)
 	}
 	
+	// Create embedding function for collection
 	ef, err := ollama.NewOllamaEmbeddingFunction(ollama.WithBaseURL(r.ollamaBaseUrl), ollama.WithModel(embeddings.EmbeddingModel(r.embedModel)))
 
 	if  err != nil {
 		return fmt.Errorf("error while trying to create embedding function: %w", err)
 	}
 
+	// Get collection or create it, if it does not exist yet
 	collection, err := r.dbClient.GetOrCreateCollection(
 			ctx, 
 			strconv.FormatInt(repo.GetID(), 10), 
@@ -69,6 +78,7 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 		return fmt.Errorf("error while trying to get collection: %w", err)
 	}
 
+	// Create embeddings (implicitly) and store them in vector store
 	for i := range commits {
 		commit, res, err := r.githubClient.Repositories.GetCommit(ctx, author, repoName, *commits[i].SHA, nil)
 		
@@ -79,25 +89,31 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 
 		log.Println("Creating metadata")
 		log.Println(*commit.Commit.GetAuthor().Name)
-		// Create metadata
-		metadata := chromago.NewDocumentMetadata(chromago.NewStringAttribute("author", *commit.Commit.GetAuthor().Name), chromago.NewStringAttribute("commit_message", commit.Commit.GetMessage()))
 
-		var diffs string
+		// Create metadata
+		// Metadata includes:
+		// author 			- Name of commit author
+		// commit_message 	- Message of commit
+		// commit 			- SHA of commit
+		metadata := chromago.NewDocumentMetadata(
+			chromago.NewStringAttribute("author", *commit.Commit.GetAuthor().Name), 
+			chromago.NewStringAttribute("commit_message", commit.Commit.GetMessage()),
+			chromago.NewStringAttribute("commit", commit.Commit.GetSHA()))
 
 		log.Println("Created metadata")
 		for j := range commit.Files {
-			diffs += "Filename: " + *commit.Files[j].Filename + "\nContent:"  + *commit.Files[j].Patch + "\n"
+			err = collection.Add(
+				ctx,
+				chromago.WithTexts(*commit.Files[j].Patch), 
+				chromago.WithIDGenerator(chromago.NewUUIDGenerator()),
+				chromago.WithMetadatas(metadata))
+
+			if err != nil {
+				log.Println(err)
+				log.Printf("error adding commit with sha: %s", *commits[i].SHA)
+			}
 		}
 
-		err = collection.Add(ctx, 
-			chromago.WithTexts(diffs), 
-			chromago.WithIDGenerator(chromago.NewUUIDGenerator()),
-			chromago.WithMetadatas(metadata))
-
-		if err != nil {
-			log.Println(err)
-			log.Printf("error adding commit with sha: %s", *commits[i].SHA)
-		}
 	}
 
 	return nil
