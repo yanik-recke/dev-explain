@@ -2,7 +2,7 @@
 
 *Early Development Stage*  
 
-A Golang-powered tool that lets you chat with an LLM (via Ollama) to get insights about GitHub repositories, commit histories, and code changes. Ask questions like:  
+A Golang-powered service that lets you chat with an LLM (via Ollama) to get insights about GitHub repositories, commit histories, and code changes. Ask questions like:  
 - "Are any commits using a specific method?"  
 - "Who modified this file recently?"  
 - "Explain the diff in commit XYZ."  
@@ -19,6 +19,7 @@ A Golang-powered tool that lets you chat with an LLM (via Ollama) to get insight
 - Conversational memory (refer to previous messages in prompts)  
 - Customizable ChromaDB URL/port  
 - Improved CLI tooling
+- Frontend
 - etc.
 
 ---
