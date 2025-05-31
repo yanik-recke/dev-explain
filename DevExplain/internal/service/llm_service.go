@@ -66,7 +66,7 @@ func NewLlmService(client chromago.Client, ollamaBaseUrl string, genUrl string, 
 }
 
 // Vectorizes input and does semantic search
-// in vector store
+// on vector store
 func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoName string) (string, error) {
 	log.Println("in 'doSemanticSearch'")
 
@@ -89,7 +89,7 @@ func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoNa
 		ctx,
 		chromago.WithQueryEmbeddings(embedded),
 		chromago.WithIncludeQuery(chromago.IncludeMetadatas, chromago.IncludeDocuments),
-		chromago.WithNResults(1),
+		chromago.WithNResults(5),
 	)
 
 	if err != nil {
@@ -118,6 +118,14 @@ func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoNa
 
 			if success {
 				data += "Author: " + author + "\n"
+			} else {
+				log.Println("error while trying to retrieve author from commits")
+			}
+
+			commit, success := metadata[j].GetString("commit")
+
+			if success {
+				data += "Commit: " + commit + "\n"
 			} else {
 				log.Println("error while trying to retrieve author from commits")
 			}
