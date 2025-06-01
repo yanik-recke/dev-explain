@@ -27,6 +27,9 @@ func NewPromptHandler(llmService *service.LlmService) *PromptHandler {
 }
 
 func (s *PromptHandler) GetResponseToPrompt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+
 	decoder := json.NewDecoder(r.Body)
 	var p PromptRequest
     err := decoder.Decode(&p)

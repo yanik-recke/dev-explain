@@ -38,18 +38,18 @@ func NewRepoService(dbClient chromago.Client, ollamaBaseUrl string, embedModel s
 // Instead of embedding the whole commit diff, each file
 // will be embedded separately so that a query only returns relevant
 // files
-func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
+func (r *RepoService) IndexRepo(ctx context.Context, url string) (string, error) {
 
 	author, repoName, err := parser.ParseGitHubURL(url)
 	if err != nil {
-		return fmt.Errorf("error while trying to parse url: %w", err)
+		return "", fmt.Errorf("error while trying to parse url: %w", err)
 	}
 
 	// Check if repository exists
 	repo, res, err := r.githubClient.Repositories.Get(ctx, author, repoName)
 	if err != nil {
 		log.Println(res.StatusCode)
-		return fmt.Errorf("erorr while trying to get repo: %w", err)
+		return "", fmt.Errorf("erorr while trying to get repo: %w", err)
 	}
 
 	// Get commits
@@ -57,14 +57,14 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 
 	if err != nil {
 		log.Println(res.StatusCode)
-		return fmt.Errorf("error while trying to find commits: %w", err)
+		return "", fmt.Errorf("error while trying to find commits: %w", err)
 	}
 	
 	// Create embedding function for collection
 	ef, err := ollama.NewOllamaEmbeddingFunction(ollama.WithBaseURL(r.ollamaBaseUrl), ollama.WithModel(embeddings.EmbeddingModel(r.embedModel)))
 
 	if  err != nil {
-		return fmt.Errorf("error while trying to create embedding function: %w", err)
+		return "", fmt.Errorf("error while trying to create embedding function: %w", err)
 	}
 
 	// Get collection or create it, if it does not exist yet
@@ -75,7 +75,7 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 		)
 
 	if  err != nil {
-		return fmt.Errorf("error while trying to get collection: %w", err)
+		return "", fmt.Errorf("error while trying to get collection: %w", err)
 	}
 
 	// Create embeddings (implicitly) and store them in vector store
@@ -116,5 +116,5 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) error {
 
 	}
 
-	return nil
+	return strconv.FormatInt(repo.GetID(), 10), nil
 }
