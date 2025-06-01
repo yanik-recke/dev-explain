@@ -32,6 +32,22 @@ func New(ollamaUrl, chatUrl, embedModel, chatModel, token string) *App {
 		log.Fatalf("Error initialzing DB client")
 	}	
 
+	tenant, err := client.GetTenant(context.TODO(), chromago.NewTenant("root"))
+
+	if err != nil {
+		log.Fatalf("Error creating tenant")
+	}
+
+	client.UseTenant(context.TODO(), tenant)
+	
+	db, err := client.GetDatabase(context.TODO(), chromago.NewDatabase("devexplain", tenant))
+
+	if err != nil {
+		log.Fatalf("Error creating db")
+	}
+
+	client.UseDatabase(context.TODO(), db)
+
 	repoService := *service.NewRepoService(client, ollamaUrl, embedModel, token)
 	llmService := *service.NewLlmService(client, ollamaUrl, chatUrl , embedModel, chatModel)
 

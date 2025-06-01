@@ -17,6 +17,10 @@ type FetchRepoResponse struct {
 	Id string `json:"id"`
 }
 
+type FetchSavedRepositoriesResponse struct {
+	Repos []service.SavedRepo `json:"repos"`
+}
+
 type RepoHandler struct {
 	repoService *service.RepoService
 }
@@ -55,4 +59,21 @@ func (s *RepoHandler) FetchRepo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+func (s *RepoHandler) FetchSavedRepositories(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+
+	repos, err := s.repoService.GetSavedRepos(context.TODO())
+
+	if err != nil {
+		log.Println("error while trying to get saved repos: ", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(repos)
 }

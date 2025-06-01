@@ -17,5 +17,10 @@ func RepoRoutes(prefix string, router chi.Router, client chromago.Client, s *ser
 			w.Header().Set("Access-Control-Allow-Headers", "*")
 		})
 		router.Post("/repo", handler.FetchRepo)
+		router.Options("/repos", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+		})
+		router.Get("/repos", handler.FetchSavedRepositories)
 	})
 }
