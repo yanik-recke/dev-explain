@@ -32,7 +32,7 @@ func New(ollamaUrl, chatUrl, embedModel, chatModel, token string) *App {
 		log.Fatalf("Error initialzing DB client")
 	}	
 
-	tenant, err := client.GetTenant(context.TODO(), chromago.NewTenant("root"))
+	tenant, err := client.CreateTenant(context.TODO(), chromago.NewTenant("root"))
 
 	if err != nil {
 		log.Fatalf("Error creating tenant")
@@ -40,7 +40,7 @@ func New(ollamaUrl, chatUrl, embedModel, chatModel, token string) *App {
 
 	client.UseTenant(context.TODO(), tenant)
 	
-	db, err := client.GetDatabase(context.TODO(), chromago.NewDatabase("devexplain", tenant))
+	db, err := client.CreateDatabase(context.TODO(), chromago.NewDatabase("devexplain", tenant))
 
 	if err != nil {
 		log.Fatalf("Error creating db")

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -13,10 +14,16 @@ import (
 	"github.com/yanik-recke/devexplain/internal/parser"
 )
 
+type Commit struct {
+	Sha string `json:"sha"`
+	Message string `json:"message"`
+}
+
 type SavedRepo struct  {
 	Id string `json:"id"`
 	Name string `json:"name"`
 	Value string `json:"value"`
+	Commits []Commit `json:"commits"`
 }
 
 type RepoService struct {
@@ -57,19 +64,18 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) (string, error)
 		return "", fmt.Errorf("erorr while trying to get repo: %w", err)
 	}
 
-
-	err = r.saveRepo(ctx, SavedRepo{strconv.FormatInt(repo.GetID(), 10), repo.GetName(), repo.GetName()})
-
-	if err != nil {
-		return "", fmt.Errorf("erorr while trying to save repo: %w", err)
-	}
-
 	// Get commits
 	commits, res, err := r.githubClient.Repositories.ListCommits(ctx, author, repoName, nil)
 
 	if err != nil {
 		log.Println(res.StatusCode)
 		return "", fmt.Errorf("error while trying to find commits: %w", err)
+	}
+
+	err = r.saveRepo(ctx, repo, commits)
+
+	if err != nil {
+		return "", fmt.Errorf("erorr while trying to save repo: %w", err)
 	}
 	
 	// Create embedding function for collection
@@ -112,11 +118,16 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) (string, error)
 			chromago.NewStringAttribute("commit_message", commit.Commit.GetMessage()),
 			chromago.NewStringAttribute("commit", commit.Commit.GetSHA()))
 
+		// TODO fix
+		log.Println(commit.Commit.GetSHA())
 		log.Println("Created metadata")
+
 		for j := range commit.Files {
+
+
 			err = collection.Add(
 				ctx,
-				chromago.WithTexts(*commit.Files[j].Patch), 
+				chromago.WithTexts(commit.Files[j].GetPatch()), 
 				chromago.WithIDGenerator(chromago.NewUUIDGenerator()),
 				chromago.WithMetadatas(metadata))
 
@@ -172,10 +183,24 @@ func (r *RepoService) GetSavedRepos(ctx context.Context) ([]SavedRepo, error){
 			return nil, fmt.Errorf("error while getting value from metadata")
 		}
 
+		commits, err := result.GetMetadatasGroups()[0][i].GetString("commits")
+		if !err {
+			return nil, fmt.Errorf("error while getting commits from metadata")
+		}
+
 		var repo SavedRepo
 		repo.Id = id
 		repo.Name = name
 		repo.Value = value
+		var commitsUnmarshalled []Commit
+		// with hopes and prayers
+		error := json.Unmarshal([]byte(commits), &commitsUnmarshalled)
+
+		if error != nil {
+			return nil, fmt.Errorf("error trying to unmarshal commits: %w", error)
+		}
+
+		repo.Commits = commitsUnmarshalled
 
 		repos = append(repos, repo)
 	}
@@ -187,7 +212,7 @@ func (r *RepoService) GetSavedRepos(ctx context.Context) ([]SavedRepo, error){
 	return repos, nil
 }
 
-func (r *RepoService) saveRepo(ctx context.Context, repo SavedRepo) error {
+func (r *RepoService) saveRepo(ctx context.Context, repo *github.Repository, commits []*github.RepositoryCommit) error {
 
 	// Create embedding function for collection
 	ef, err := ollama.NewOllamaEmbeddingFunction(ollama.WithBaseURL(r.ollamaBaseUrl), ollama.WithModel(embeddings.EmbeddingModel(r.embedModel)))
@@ -203,12 +228,30 @@ func (r *RepoService) saveRepo(ctx context.Context, repo SavedRepo) error {
 		return fmt.Errorf("error while trying to get or create collection: %w", err)
 	}
 
-	metadata := chromago.NewDocumentMetadata(
-		chromago.NewStringAttribute("id", repo.Id), 
-		chromago.NewStringAttribute("name", repo.Name),
-		chromago.NewStringAttribute("value", repo.Name))
+	var savedCommits []Commit
+	for i := range commits {
+		savedCommits = append(savedCommits, Commit{commits[i].GetSHA(), commits[i].GetCommit().GetMessage()})
+	}
 
-	err = collection.Add(ctx, chromago.WithTexts("placeholder"), chromago.WithIDGenerator(chromago.NewUUIDGenerator()), chromago.WithMetadatas(metadata))
+	jsonString, err := json.Marshal(savedCommits)
+
+	if err != nil {
+		return fmt.Errorf("error trying to marshal the commits: %w", err)
+	}
+
+	commitsMeta := chromago.NewEmptyMetadata()
+	commitsMeta.SetString("commits", string(jsonString))
+	commitsMeta.SetString("id", strconv.FormatInt(repo.GetID(), 10))
+	commitsMeta.SetString("name", repo.GetName())
+	commitsMeta.SetString("value", repo.GetName())
+
+	// metadata := chromago.NewDocumentMetadata(
+	// 	chromago.NewStringAttribute("id", strconv.FormatInt(repo.GetID(), 10)), 
+	// 	chromago.NewStringAttribute("name", repo.GetName()),
+	// 	chromago.NewStringAttribute("value", repo.GetName()),
+	// )
+
+	err = collection.Add(ctx, chromago.WithTexts("placeholder"), chromago.WithIDGenerator(chromago.NewUUIDGenerator()), chromago.WithMetadatas(commitsMeta))
 	
 	if err != nil {
 		log.Println("Error while trying to add to collection")
