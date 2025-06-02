@@ -26,27 +26,7 @@ func New(ollamaUrl, chatUrl, embedModel, chatModel, token string) *App {
 
 	router.Use(middleware.Logger)
 
-	client, err := chromago.NewHTTPClient()
-
-	if err != nil {
-		log.Fatalf("Error initialzing DB client")
-	}	
-
-	tenant, err := client.CreateTenant(context.TODO(), chromago.NewTenant("root"))
-
-	if err != nil {
-		log.Fatalf("Error creating tenant")
-	}
-
-	client.UseTenant(context.TODO(), tenant)
-	
-	db, err := client.CreateDatabase(context.TODO(), chromago.NewDatabase("devexplain", tenant))
-
-	if err != nil {
-		log.Fatalf("Error creating db")
-	}
-
-	client.UseDatabase(context.TODO(), db)
+	client := initDbClient("root", "devexplain")
 
 	repoService := *service.NewRepoService(client, ollamaUrl, embedModel, token)
 	llmService := *service.NewLlmService(client, ollamaUrl, chatUrl , embedModel, chatModel)
@@ -78,4 +58,44 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	return nil
+} 
+
+
+func initDbClient(tenantName, dbName string) chromago.Client {
+	client, err := chromago.NewHTTPClient()
+
+	if err != nil {
+		log.Fatalf("Error initialzing DB client")
+	}
+
+	// Trying to get tenant, if does not exist, try to create one
+	tenant, err := client.GetTenant(context.TODO(), chromago.NewTenant(tenantName))
+
+	if err != nil {
+		log.Printf("Error getting tenant, trying to create tenant")
+
+		tenant, err = client.CreateTenant(context.TODO(), chromago.NewTenant(tenantName))
+
+		if err != nil {
+			log.Fatalf("could not get or create tenant")
+		}
+	}
+	client.UseTenant(context.TODO(), tenant)
+	
+
+	db, err := client.GetDatabase(context.TODO(), chromago.NewDatabase(dbName, tenant))
+
+	if err != nil {
+		log.Print("Error creating db")
+
+		db, err = client.CreateDatabase(context.TODO(), chromago.NewDatabase(dbName, tenant))
+
+		if err != nil {
+			log.Fatalf("could not get or create database")
+		}
+	}
+
+	client.UseDatabase(context.TODO(), db)
+
+	return client;
 }

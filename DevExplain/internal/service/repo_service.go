@@ -118,7 +118,6 @@ func (r *RepoService) IndexRepo(ctx context.Context, url string) (string, error)
 			chromago.NewStringAttribute("commit_message", commit.Commit.GetMessage()),
 			chromago.NewStringAttribute("commit", commit.Commit.GetSHA()))
 
-		// TODO fix
 		log.Println(commit.Commit.GetSHA())
 		log.Println("Created metadata")
 
