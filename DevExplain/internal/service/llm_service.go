@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/google/go-github/v72/github"
+	"github.com/yanik-recke/devexplain/internal/parser"
 	"io"
 	"log"
 	"net/http"
@@ -17,8 +19,7 @@ import (
 	ollama "github.com/amikos-tech/chroma-go/pkg/embeddings/ollama"
 )
 
-const LLMContext = 
-`You are a technical expert that has to explain codebase changes 
+const LLMContext = `You are a technical expert that has to explain codebase changes 
 to users that might not be familiar with the technology used in the code base.
 Unless instructed otherwise, focus on the effects of the changes and not 
 their technical implementations.
@@ -42,36 +43,70 @@ type GeneratedResponse struct {
 }
 
 type CommitData struct {
-	Filename	string
-	Diff		string
-	Message 	string
+	Filename string
+	Diff     string
+	Message  string
 }
 
 type LlmService struct {
-	client chromago.Client
+	client        chromago.Client
 	ollamaBaseUrl string
-	genUrl string
-	embedModel string
-	convModel string
+	genUrl        string
+	embedModel    string
+	convModel     string
+	intentService *IntentService
+	githubClient  *github.Client
 }
 
-func NewLlmService(client chromago.Client, ollamaBaseUrl string, genUrl string, embedModel string, convModel string) *LlmService {
+func NewLlmService(client chromago.Client, ollamaBaseUrl, genUrl, embedModel, convModel, token string, intentService *IntentService) *LlmService {
+	githubClient := github.NewClient(nil).WithAuthToken(token)
 	return &LlmService{
 		client,
 		ollamaBaseUrl,
 		genUrl,
 		embedModel,
 		convModel,
+		intentService,
+		githubClient,
 	}
 }
 
 // Vectorizes input and does semantic search
 // on vector store
-func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoName string) (string, error) {
+func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoId string) (string, error) {
 	log.Println("in 'doSemanticSearch'")
 
-	collection, err := l.client.GetCollection(ctx, repoName,
-	 chromago.WithEmbeddingFunctionGet(embeddings.NewConsistentHashEmbeddingFunction()))
+	isSpecific, err := l.intentService.intentIsSpecificSHA(prompt)
+
+	if err != nil {
+		log.Println("error while trying to determine if prompt asks for specific commit SHA: " + err.Error())
+		isSpecific = false
+	}
+
+	if isSpecific {
+		log.Println("user seems to have asked for specific commit")
+		data, err := l.getSpecificCommit(ctx, prompt, repoId)
+
+		if err != nil {
+			return "", fmt.Errorf("error while trying to get specific commit by SHA: %w", err)
+		}
+
+		if data != "" {
+			response, err := l.generateResponse(ctx, prompt, data)
+
+			if err != nil {
+				return "", fmt.Errorf("failed to generate answer: %w", err)
+			}
+
+			return response, nil
+		}
+	}
+
+	log.Println("user seems to not have asked for a specific commit, or getting the commit failed")
+	// If we get here, then either isSpecific is false or an error occurred
+	// while trying to get the specific commit by SHA
+	collection, err := l.client.GetCollection(ctx, repoId,
+		chromago.WithEmbeddingFunctionGet(embeddings.NewConsistentHashEmbeddingFunction()))
 
 	if err != nil {
 		return "", fmt.Errorf("failed to get collection: %w", err)
@@ -138,7 +173,6 @@ func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoNa
 
 	}
 
-
 	// log.Println(data)
 	response, err := l.generateResponse(ctx, prompt, data)
 
@@ -149,13 +183,58 @@ func (l *LlmService) DoSemanticSearch(ctx context.Context, prompt string, repoNa
 	return response, nil
 }
 
+func (l *LlmService) getSpecificCommit(ctx context.Context, prompt, id string) (string, error) {
+
+	sha := parser.ParseSHA(prompt)
+	if sha == "" {
+		return "", fmt.Errorf("failed to parse / find commit SHA")
+	}
+
+	log.Printf("got commit %s: ", sha)
+
+	// Convert string to int64 (base 10, 64-bit)
+	i64, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("failed to convert id to i64: %w", err)
+	}
+
+	repo, res, err := l.githubClient.Repositories.GetByID(ctx, i64)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo by id: %w, github res code: %d", err, res.StatusCode)
+	}
+
+	log.Printf("got repo by id, owner: %s, name: %s, looking for sha: %s", repo.GetOwner().GetLogin(), repo.GetName(), sha)
+
+	commit, res, err := l.githubClient.Repositories.GetCommit(ctx, repo.GetOwner().GetLogin(), repo.GetName(), sha, nil)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to get commit: %w with response code: %d", err, res.StatusCode)
+	}
+
+	log.Println("got commit")
+
+	response := "Author: " + *commit.GetAuthor().Name + "\n"
+	response += "Message: " + commit.GetCommit().GetMessage() + "\n"
+	response += "Diffs:\n"
+
+	log.Println("prepared message")
+
+	for i := range commit.Files {
+		response += commit.Files[i].GetPatch() + "\n"
+	}
+
+	log.Printf("created response: %s", response)
+
+	return response, nil
+}
 
 func (l *LlmService) embed(ctx context.Context, prompt string) (embeddings.Embedding, error) {
 
 	ef, err := ollama.NewOllamaEmbeddingFunction(ollama.WithBaseURL(l.ollamaBaseUrl), ollama.WithModel(embeddings.EmbeddingModel(l.embedModel)))
-    if err != nil {
-        fmt.Printf("Error creating Ollama embedding function: %s \n", err)
-    }
+	if err != nil {
+		fmt.Printf("Error creating Ollama embedding function: %s \n", err)
+	}
 
 	result, err := ef.EmbedQuery(ctx, prompt)
 
@@ -167,10 +246,10 @@ func (l *LlmService) embed(ctx context.Context, prompt string) (embeddings.Embed
 }
 
 func (l *LlmService) generateResponse(ctx context.Context, prompt string, data string) (string, error) {
-	enhancedPrompt := LLMContext +  "Using this information: " + data + "\nPlease reply to this prompt:\n" + prompt
+	enhancedPrompt := LLMContext + "Using this information: " + data + "\nPlease reply to this prompt:\n" + prompt
 	log.Println(enhancedPrompt)
 	reqBody, err := json.Marshal(GeneratedRequest{
-		Model: l.convModel,
+		Model:  l.convModel,
 		Prompt: enhancedPrompt,
 		Stream: false,
 	})
@@ -182,7 +261,7 @@ func (l *LlmService) generateResponse(ctx context.Context, prompt string, data s
 	log.Println("marshalling succeeded")
 
 	req, err := http.NewRequestWithContext(ctx, "POST", l.genUrl, bytes.NewBuffer(reqBody))
-	
+
 	req.Header.Set("Content-Type", "application/json")
 
 	if err != nil {

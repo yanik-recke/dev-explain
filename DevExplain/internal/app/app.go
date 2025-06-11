@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	chromago "github.com/amikos-tech/chroma-go/pkg/api/v2"
+	"github.com/amikos-tech/chroma-go/pkg/embeddings"
+	"github.com/amikos-tech/chroma-go/pkg/embeddings/ollama"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	prompts "github.com/yanik-recke/devexplain/internal/routes/llm"
@@ -19,22 +21,22 @@ type App struct {
 	client chromago.Client
 }
 
-
-func New(ollamaUrl, chatUrl, embedModel, chatModel, token string) *App {
+func New(ollamaUrl, chatUrl, embedModel, chatModel, token, intentUrl, healthUrl string) *App {
 
 	router := chi.NewRouter()
 
 	router.Use(middleware.Logger)
 
-	client := initDbClient("root", "devexplain")
+	client := initDbClient("root", "devexplain", ollamaUrl, embedModel)
 
 	repoService := *service.NewRepoService(client, ollamaUrl, embedModel, token)
-	llmService := *service.NewLlmService(client, ollamaUrl, chatUrl , embedModel, chatModel)
+	intentService := *service.NewIntentService(intentUrl, healthUrl)
+	llmService := *service.NewLlmService(client, ollamaUrl, chatUrl, embedModel, chatModel, token, &intentService)
 
 	prompts.PromptRoutes("/api/ai/", router, client, &llmService)
 	repos.RepoRoutes("/api/repos/", router, client, &repoService)
 
-	app := &App {
+	app := &App{
 		router,
 		client,
 	}
@@ -42,12 +44,14 @@ func New(ollamaUrl, chatUrl, embedModel, chatModel, token string) *App {
 	return app
 }
 
+// Start
 // Starts the server
 // Parameter:
-//		ctx: TODO
+//
+//	ctx: TODO
 func (a *App) Start(ctx context.Context) error {
-	server := &http.Server { 
-		Addr: ":3001",
+	server := &http.Server{
+		Addr:    ":3001",
 		Handler: a.router,
 	}
 
@@ -58,10 +62,9 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	return nil
-} 
+}
 
-
-func initDbClient(tenantName, dbName string) chromago.Client {
+func initDbClient(tenantName, dbName, ollamaBaseUrl, embedModel string) chromago.Client {
 	client, err := chromago.NewHTTPClient()
 
 	if err != nil {
@@ -80,13 +83,13 @@ func initDbClient(tenantName, dbName string) chromago.Client {
 			log.Fatalf("could not get or create tenant")
 		}
 	}
+
 	client.UseTenant(context.TODO(), tenant)
-	
 
 	db, err := client.GetDatabase(context.TODO(), chromago.NewDatabase(dbName, tenant))
 
 	if err != nil {
-		log.Print("Error creating db")
+		log.Print("Error getting db, trying to create db")
 
 		db, err = client.CreateDatabase(context.TODO(), chromago.NewDatabase(dbName, tenant))
 
@@ -97,5 +100,19 @@ func initDbClient(tenantName, dbName string) chromago.Client {
 
 	client.UseDatabase(context.TODO(), db)
 
-	return client;
+	// Create embedding function for collection
+	ef, err := ollama.NewOllamaEmbeddingFunction(ollama.WithBaseURL(ollamaBaseUrl), ollama.WithModel(embeddings.EmbeddingModel(embedModel)))
+
+	if err != nil {
+		log.Fatalf("Error trying to create embedding function for repo collection: %w", err)
+	}
+
+	// Get or create collection
+	_, err = client.GetOrCreateCollection(context.TODO(), "repos", chromago.WithEmbeddingFunctionCreate(ef))
+
+	if err != nil {
+		log.Fatalf("Error trying to get or create collection for repos: %w", err)
+	}
+
+	return client
 }

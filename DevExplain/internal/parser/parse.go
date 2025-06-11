@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -32,4 +33,23 @@ func ParseGitHubURL(repoURL string) (string, string, error) {
 	repo := strings.TrimSuffix(parts[1], ".git") // Remove .git suffix if present
 
 	return owner, repo, nil
+}
+
+func ParseSHA(text string) string {
+	// Compile the regex pattern for commit SHAs
+	// \bcommit\s+[0-9a-f]{7,40}\b
+	// - \b word boundary
+	// - commit literal word
+	// - \s+ one or more whitespace
+	// - [0-9a-f]{7,40} hexadecimal chars (7-40 chars, GitHub SHA length)
+	// - \b word boundary
+	// Added (?i) flag for case insensitivity (Go doesn't have re.IGNORECASE parameter)
+	// TODO maybe use a-f since SHAs apparently only
+	shaRegex := regexp.MustCompile(`\b[a-f0-9]{7,40}\b`)
+	matches := shaRegex.FindStringSubmatch(text)
+
+	if len(matches) > 0 {
+		return matches[0]
+	}
+	return ""
 }
